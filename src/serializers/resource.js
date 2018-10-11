@@ -49,12 +49,13 @@ function ResourceSerializer(
   this.perform = () => {
     const typeForAttributes = {};
 
-    function getRelatedLinkForBelongsTo(relatedModelName, idField) {
-      return (record, current) => `/forest/${relatedModelName}/${current[idField]}`;
-    }
-
     function getRelatedLinkForHasMany(relatedModelName, relationshipName, idField) {
-      return (record, current, parent) => `/forest/${relatedModelName}/${parent[idField]}/relationships/${relationshipName}`;
+      return (record, current, parent) => {
+        if (current && current[relationshipName]) {
+          return null;
+        }
+        return `/forest/${relatedModelName}/${parent[idField]}/relationships/${relationshipName}`;
+      };
     }
 
     function getReferenceField(referenceSchema, field) {
@@ -90,7 +91,7 @@ function ResourceSerializer(
               attributes: getFieldsNames(field.type.fields),
             };
 
-            getAttributesFor(dest[field.field], field.type.fields);
+            getAttributesFor(dest[field.field], field.type.fields, include);
           } else if (field.reference) {
             const referenceType = field.reference.split('.')[0];
             const referenceSchema = Schemas.schemas[referenceType];
@@ -107,27 +108,22 @@ function ResourceSerializer(
               detectFieldWithSpecialFormat(schemaField, fieldName);
             });
 
+            const relatedFunction = field.relationship === 'BelongsTo'
+              ? null
+              : getRelatedLinkForHasMany(modelName, field.field, schema.idField);
             dest[fieldName] = {
               ref: fieldReference,
               nullIfMissing: true,
-            };
-            if (!include) {
-              const [referenceModelName] = field.reference.split('.');
-              const relatedFunction = field.relationship === 'BelongsTo'
-                ? getRelatedLinkForBelongsTo(referenceModelName, referenceSchema.idField)
-                : getRelatedLinkForHasMany(modelName, field.field, schema.idField);
-
-              dest[fieldName].relationshipLinks = {
+              attributes: getFieldsNames(referenceSchema.fields),
+              relationshipLinks: {
                 related: relatedFunction,
-              };
-            } else {
-              dest[fieldName].attributes = getFieldsNames(referenceSchema.fields);
-            }
+              },
+            };
 
             if (_.isArray(field.type) || !include) {
               dest[fieldName].ignoreRelationshipData = include;
               dest[fieldName].included = false;
-            } else {
+            } else if (include) {
               const referenceFields = referenceSchema.fields
                 .filter((subField) => subField.reference);
               getAttributesFor(dest[fieldName], referenceFields, false);
@@ -166,7 +162,7 @@ function ResourceSerializer(
       });
     }
 
-    function defineRelationshipId(fields) {
+    function defineRelationshipId(fields, goDeeper = true) {
       const recordArray = _.isArray(records) ? records : [records];
       recordArray.forEach((record) => {
         fields.forEach((field) => {
@@ -177,8 +173,8 @@ function ResourceSerializer(
           const fieldName = field.field;
           const [referenceType, referenceKey] = field.reference.split('.');
           const referenceSchema = Schemas.schemas[referenceType];
-          if (record[fieldName]) {
-            defineRelationshipId(record[fieldName], referenceSchema.fields);
+          if (goDeeper && record[fieldName]) {
+            defineRelationshipId(record[fieldName], referenceSchema.fields, false);
           }
 
           if (field.relationship === 'BelongsTo') {
