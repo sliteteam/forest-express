@@ -49,7 +49,29 @@ function ResourceSerializer(
   this.perform = () => {
     const typeForAttributes = {};
 
-    function getAttributesFor(dest, fields) {
+    function getRelatedLinkForBelongsTo(relatedModelName, idField) {
+      return (record, current) => `/forest/${relatedModelName}/${current[idField]}`;
+    }
+
+    function getRelatedLinkForHasMany(relatedModelName, relationshipName, idField) {
+      return (record, current, parent) => `/forest/${relatedModelName}/${parent[idField]}/relationships/${relationshipName}`;
+    }
+
+    function getReferenceField(referenceSchema, field) {
+      let fieldReference = referenceSchema.idField;
+
+      if (_.isArray(field.type) && !fieldReference && referenceSchema.isVirtual) {
+        if (_.find(referenceSchema.fields, (subField) => subField.field === 'id')) {
+          fieldReference = 'id';
+        } else {
+          logger.warn(`Cannot find the 'idField' attribute in your '${referenceSchema.name}' Smart Collection declaration.`);
+        }
+      }
+
+      return fieldReference || 'id';
+    }
+
+    function getAttributesFor(dest, fields, include = true) {
       _.map(fields, (field) => {
         detectFieldWithSpecialFormat(field);
 
@@ -79,15 +101,7 @@ function ResourceSerializer(
               return;
             }
 
-            let fieldReference = referenceSchema.idField;
-
-            if (_.isArray(field.type) && !fieldReference && referenceSchema.isVirtual) {
-              if (_.find(referenceSchema.fields, (schemaField) => schemaField.field === 'id')) {
-                fieldReference = 'id';
-              } else {
-                logger.warn(`Cannot find the 'idField' attribute in your '${referenceSchema.name}' Smart Collection declaration.`);
-              }
-            }
+            const fieldReference = getReferenceField(referenceSchema, field);
 
             _.each(referenceSchema.fields, (schemaField) => {
               detectFieldWithSpecialFormat(schemaField, fieldName);
@@ -95,17 +109,28 @@ function ResourceSerializer(
 
             dest[fieldName] = {
               ref: fieldReference,
-              attributes: getFieldsNames(referenceSchema.fields),
-              relationshipLinks: {
-                related: (dataSet) => ({
-                  href: `/forest/${Implementation.getModelName(model)}/${dataSet[schema.idField]}/relationships/${field.field}`,
-                }),
-              },
+              nullIfMissing: true,
             };
+            if (!include) {
+              const [referenceModelName] = field.reference.split('.');
+              const relatedFunction = field.relationship === 'BelongsTo'
+                ? getRelatedLinkForBelongsTo(referenceModelName, referenceSchema.idField)
+                : getRelatedLinkForHasMany(modelName, field.field, schema.idField);
 
-            if (_.isArray(field.type)) {
-              dest[fieldName].ignoreRelationshipData = true;
+              dest[fieldName].relationshipLinks = {
+                related: relatedFunction,
+              };
+            } else {
+              dest[fieldName].attributes = getFieldsNames(referenceSchema.fields);
+            }
+
+            if (_.isArray(field.type) || !include) {
+              dest[fieldName].ignoreRelationshipData = include;
               dest[fieldName].included = false;
+            } else {
+              const referenceFields = referenceSchema.fields
+                .filter((subField) => subField.reference);
+              getAttributesFor(dest[fieldName], referenceFields, false);
             }
           }
         }
@@ -141,6 +166,34 @@ function ResourceSerializer(
       });
     }
 
+    function defineRelationshipId(fields) {
+      const recordArray = _.isArray(records) ? records : [records];
+      recordArray.forEach((record) => {
+        fields.forEach((field) => {
+          if (!field.reference) {
+            return;
+          }
+
+          const fieldName = field.field;
+          const [referenceType, referenceKey] = field.reference.split('.');
+          const referenceSchema = Schemas.schemas[referenceType];
+          if (record[fieldName]) {
+            defineRelationshipId(record[fieldName], referenceSchema.fields);
+          }
+
+          if (field.relationship === 'BelongsTo') {
+            if (!record[fieldName]) {
+              const fieldReference = getReferenceField(referenceSchema, field);
+
+              record[fieldName] = {
+                [fieldReference]: record[referenceKey],
+              };
+            }
+          }
+        });
+      });
+    }
+
     const serializationOptions = {
       id: schema.idField,
       attributes: getFieldsNames(schema.fields),
@@ -150,7 +203,7 @@ function ResourceSerializer(
     };
 
     getAttributesFor(serializationOptions, schema.fields);
-
+    defineRelationshipId(records, schema.fields);
     // NOTICE: Format Dateonly field types before serialization.
     if (_.isArray(records)) {
       _.each(records, (record) => { formatFields(record); });
