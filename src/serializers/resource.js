@@ -110,7 +110,7 @@ function ResourceSerializer(
 
             const relatedFunction = field.relationship === 'BelongsTo'
               ? null
-              : getRelatedLinkForHasMany(modelName, field.field, schema.idField);
+              : getRelatedLinkForHasMany(modelName, field.field);
             dest[fieldName] = {
               ref: fieldReference,
               nullIfMissing: true,
