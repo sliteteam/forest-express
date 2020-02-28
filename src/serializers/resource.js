@@ -49,12 +49,12 @@ function ResourceSerializer(
   this.perform = () => {
     const typeForAttributes = {};
 
-    function getRelatedLinkForHasMany(relatedModelName, relationshipName, idField) {
+    function getRelatedLinkForHasMany(relatedModelName, relationshipName) {
       return (record, current, parent) => {
         if (current && current[relationshipName]) {
           return null;
         }
-        return `/forest/${relatedModelName}/${parent[idField]}/relationships/${relationshipName}`;
+        return `/forest/${relatedModelName}/${parent.id}/relationships/${relationshipName}`;
       };
     }
 
