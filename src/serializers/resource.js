@@ -162,8 +162,8 @@ function ResourceSerializer(
       });
     }
 
-    function defineRelationshipId(fields, goDeeper = true) {
-      const recordArray = _.isArray(records) ? records : [records];
+    function defineRelationshipId(innerRecords, fields, goDeeper = true) {
+      const recordArray = _.isArray(innerRecords) ? innerRecords : [innerRecords];
       recordArray.forEach((record) => {
         fields.forEach((field) => {
           if (!field.reference) {
